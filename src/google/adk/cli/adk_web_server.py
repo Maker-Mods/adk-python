@@ -430,14 +430,14 @@ class AdkWebServer:
           )
           is not None
       ):
-        logger.warning("Session already exists: %s", session_id)
         raise HTTPException(
             status_code=400, detail=f"Session already exists: {session_id}"
         )
-      logger.info("New session created: %s", session_id)
-      return await self.session_service.create_session(
+      session = await self.session_service.create_session(
           app_name=app_name, user_id=user_id, state=state, session_id=session_id
       )
+      logger.info("New session created: %s", session_id)
+      return session
 
     @app.post(
         "/apps/{app_name}/users/{user_id}/sessions",
@@ -449,7 +449,6 @@ class AdkWebServer:
         state: Optional[dict[str, Any]] = None,
         events: Optional[list[Event]] = None,
     ) -> Session:
-      logger.info("New session created")
       session = await self.session_service.create_session(
           app_name=app_name, user_id=user_id, state=state
       )
@@ -458,6 +457,7 @@ class AdkWebServer:
         for event in events:
           await self.session_service.append_event(session=session, event=event)
 
+      logger.info("New session created")
       return session
 
     @app.post(
