@@ -87,6 +87,13 @@ logger = logging.getLogger("google_adk." + __name__)
 
 _EVAL_SET_FILE_EXTENSION = ".evalset.json"
 
+dialogue_triggers = {}
+
+def as_dialogue_trigger(func):
+  global dialogue_triggers
+  dialogue_triggers[func.__name__] = None
+  print(func.__name__, "is a dialogue trigger")
+  return func
 
 class ApiServerSpanExporter(export_lib.SpanExporter):
 
@@ -840,19 +847,49 @@ class AdkWebServer:
               StreamingMode.SSE if req.streaming else StreamingMode.NONE
           )
           runner = await self.get_runner_async(req.app_name)
-          async for event in runner.run_async(
-              user_id=req.user_id,
-              session_id=req.session_id,
-              new_message=req.new_message,
-              state_delta=req.state_delta,
-              run_config=RunConfig(streaming_mode=stream_mode),
-          ):
-            # Format as SSE data
-            sse_event = event.model_dump_json(exclude_none=True, by_alias=True)
-            logger.debug(
-                "Generated event in agent run streaming: %s", sse_event
-            )
-            yield f"data: {sse_event}\n\n"
+
+          try:
+            async for event in runner.run_async(
+                user_id=req.user_id,
+                session_id=req.session_id,
+                new_message=req.new_message,
+                state_delta=req.state_delta,
+                run_config=RunConfig(
+                    streaming_mode=stream_mode,
+                    dialogue_triggers=set(dialogue_triggers.keys()) if dialogue_triggers else None
+                ),
+            ):
+              #print("%####", event, "#####")
+              
+              # Check if this is a dialogue trigger event
+              # NOTE: Dialogue triggers are now handled by the proper dialogue system in project_api.py
+              # This old dialogueOption system is disabled to avoid conflicts
+              # if (event.get_function_responses() and 
+              #     dialogue_triggers and 
+              #     event.get_function_responses()[0].name in dialogue_triggers):
+              #   # Old dialogue system - now handled by project_api.py dialogue system
+              #   pass
+              # else:
+              
+              # Format as SSE data
+              sse_event = event.model_dump_json(exclude_none=True, by_alias=True)
+              logger.debug(
+                  "Generated event in agent run streaming: %s", sse_event
+              )
+              yield f"data: {sse_event}\n\n"
+          except StopAsyncIteration:
+            pass
+          except StopIteration:
+            pass
+          except GeneratorExit:
+            pass
+          except Exception as e:
+            logger.exception("Error in runner iteration: %s", e)
+          finally:
+            try:
+              await runner.close()
+            except Exception as e:
+              logger.warning(f"Error closing runner: {e}")
         except Exception as e:
           logger.exception("Error in event_generator: %s", e)
           # You might want to yield an error event here

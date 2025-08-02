@@ -203,14 +203,29 @@ class BaseAgent(BaseModel):
       if ctx.end_invocation:
         return
 
-      async for event in self._run_async_impl(ctx):
-        yield event
+      _run_async_impl_gen = self._run_async_impl(ctx)
+      try:
+        #while True:
+        async for event in _run_async_impl_gen:
+          yield event
+          # event = await _run_async_impl_gen.asend(None)
+          # print("\n\n", "CTX"*50, ctx, "\n\n")
+          # print(event, "#"*20, "\n\n")
+          # if event.get_function_responses() and event.get_function_responses()[0].name in ctx.run_config.dialogue_triggers:
+          #   yield event
+          #   print("TRIGGERED")
+          #   await _run_async_impl_gen.aclose()
+          #   raise StopAsyncIteration()
+          # yield event
+      except StopAsyncIteration:
+        pass
+      finally:
 
-      if ctx.end_invocation:
-        return
+        if ctx.end_invocation:
+          return
 
-      if event := await self.__handle_after_agent_callback(ctx):
-        yield event
+        if event := await self.__handle_after_agent_callback(ctx):
+          yield event
 
   @final
   async def run_live(

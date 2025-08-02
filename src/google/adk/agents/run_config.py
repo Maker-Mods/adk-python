@@ -92,6 +92,13 @@ class RunConfig(BaseModel):
     - Less than or equal to 0: This allows for unbounded number of llm calls.
   """
 
+  dialogue_triggers: Optional[set[str]] = None
+  """
+  Set of function names that should trigger dialogue mode and stop further processing.
+  When an event contains a function response with a name in this set, the runner
+  will yield that event and then stop processing further events.
+  """
+
   @field_validator('max_llm_calls', mode='after')
   @classmethod
   def validate_max_llm_calls(cls, value: int) -> int:

@@ -291,6 +291,7 @@ class BaseLlmFlow(ABC):
         last_event = event
         yield event
       if not last_event or last_event.is_final_response() or last_event.partial:
+        print("LAST EVENT", last_event)
         if last_event and last_event.partial:
           logger.warning('The last event is partial, which is not expected.')
         break
@@ -303,9 +304,16 @@ class BaseLlmFlow(ABC):
     llm_request = LlmRequest()
 
     # Preprocess before calling the LLM.
+
+    end_invocation = False
     async for event in self._preprocess_async(invocation_context, llm_request):
+      # if the event is a dialogue trigger, then set skip summarization which is condition for event.is_final_response()
+      if event.get_function_responses() and event.get_function_responses()[0].name in invocation_context.run_config.dialogue_triggers:
+        event.actions.skip_summarization = True
+        invocation_context.end_invocation = True
+        end_invocation = True
       yield event
-    if invocation_context.end_invocation:
+    if invocation_context.end_invocation or end_invocation:
       return
 
     # Calls the LLM.
@@ -564,6 +572,31 @@ class BaseLlmFlow(ABC):
             stream=invocation_context.run_config.streaming_mode
             == StreamingMode.SSE,
         )
+        # try:
+        #   _run_and_handle_error_gen = self._run_and_handle_error(
+        #       responses_generator,
+        #       invocation_context,
+        #       llm_request,
+        #       model_response_event,
+        #   )
+        #   async for llm_response in _run_and_handle_error_gen:
+        #     trace_call_llm(
+        #         invocation_context,
+        #         model_response_event.id,
+        #         llm_request,
+        #         llm_response,
+        #     )
+        #     # Runs after_model_callback if it exists.
+        #     if altered_llm_response := await self._handle_after_model_callback(
+        #         invocation_context, llm_response, model_response_event
+        #     ):
+        #       llm_response = altered_llm_response
+
+        #     yield llm_response
+        # except (StopAsyncIteration, StopIteration, GeneratorExit):
+        #   _run_and_handle_error_gen.aclose()
+        # finally:
+        #   print("FINALLY")
         async for llm_response in self._run_and_handle_error(
             responses_generator,
             invocation_context,
