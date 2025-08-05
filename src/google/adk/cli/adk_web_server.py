@@ -87,6 +87,11 @@ logger = logging.getLogger("google_adk." + __name__)
 
 _EVAL_SET_FILE_EXTENSION = ".evalset.json"
 
+from pydantic import BaseModel
+class ProjectChatRequest(BaseModel):
+  message: str
+  streaming: Optional[bool] = True
+from project_api import projects_db
 dialogue_triggers = {}
 
 def as_dialogue_trigger(func):
@@ -869,13 +874,38 @@ class AdkWebServer:
               #     event.get_function_responses()[0].name in dialogue_triggers):
               #   # Old dialogue system - now handled by project_api.py dialogue system
               #   pass
-              # else:
-              
+              # else
+
               # Format as SSE data
               sse_event = event.model_dump_json(exclude_none=True, by_alias=True)
               logger.debug(
                   "Generated event in agent run streaming: %s", sse_event
               )
+              # if event.get_function_calls() and event.get_function_calls()[0].name in dialogue_triggers:
+                
+              #   # Then yield a dialogue event for the frontend to render UI
+              #   import uuid
+              #   import json
+              #   from datetime import datetime
+                
+              #   function_call = event.get_function_calls()[0]
+              #   dialogue_id = str(uuid.uuid4())
+                
+              #   # Create dialogue event that frontend can use to render UI
+                # dialogue_event = {
+                #     "type": "dialogue",
+                #     "processId": dialogue_id,
+                #     "message": f"Do you want to call function '{function_call.name}'?",
+                #     "options": ["run", "cancel"],
+                #     "timestamp": datetime.now().isoformat(),
+                #     "status": "pending",
+                #     "function_name": function_call.name,
+                #     "function_args": function_call.args if function_call.args else {}
+                # }
+                
+                # logger.info(f"Generated dialogue event for function '{function_call.name}': {dialogue_event}")
+                # yield f"data: {json.dumps(dialogue_event)}\n\ndata: {sse_event}\n\n"
+              # else:
               yield f"data: {sse_event}\n\n"
           except StopAsyncIteration:
             pass
@@ -890,6 +920,93 @@ class AdkWebServer:
               await runner.close()
             except Exception as e:
               logger.warning(f"Error closing runner: {e}")
+        except Exception as e:
+          logger.exception("Error in event_generator: %s", e)
+          # You might want to yield an error event here
+          yield f'data: {{"error": "{str(e)}"}}\n\n'
+
+      # Returns a streaming response with the proper media type for SSE
+      return StreamingResponse(
+          event_generator(),
+          media_type="text/event-stream",
+      )
+    
+    @app.post("/api/projects/{project_id}/chat")
+    async def project_chat(project_id: str, request: ProjectChatRequest) -> StreamingResponse:
+
+      if project_id not in projects_db:
+          raise HTTPException(status_code=404, detail="Project not found")
+        
+      project = projects_db[project_id]
+      session_id = project.get("sessionId")
+
+      # Create proper message object like the original run_sse endpoint
+      new_message = types.Content(role="user", parts=[{"text": request.message}])
+       
+      req = {"user_id": "user", 
+            "session_id": session_id, 
+            "app_name": "task_agent", 
+            "new_message": new_message,
+            "streaming": request.streaming,
+            "state_delta": None}
+      
+      if not session_id:
+          raise HTTPException(status_code=500, detail="Project has no associated session")
+      
+      # SSE endpoint
+      session = await self.session_service.get_session(
+          app_name=req["app_name"], user_id=req["user_id"], session_id=req["session_id"]
+      )
+      if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+      # Convert the events to properly formatted SSE
+      async def event_generator():
+        try:
+          stream_mode = (
+              StreamingMode.SSE if req["streaming"] else StreamingMode.NONE
+          )
+          runner = await self.get_runner_async(req["app_name"])
+          async for event in runner.run_async(
+               user_id=req["user_id"],
+               session_id=req["session_id"],
+               new_message=req["new_message"],
+               state_delta=req["state_delta"],
+               run_config=RunConfig(
+                   streaming_mode=stream_mode,
+                   dialogue_triggers=set(dialogue_triggers.keys()) if dialogue_triggers else None
+               ),
+           ):
+            # Format as SSE data
+            sse_event = event.model_dump_json(exclude_none=True, by_alias=True)
+            logger.debug(
+                "Generated event in agent run streaming: %s", sse_event
+            )
+            if event.get_function_calls() and event.get_function_calls()[0].name in dialogue_triggers:
+                
+                # Then yield a dialogue event for the frontend to render UI
+                import uuid
+                import json
+                from datetime import datetime
+                
+                function_call = event.get_function_calls()[0]
+                dialogue_id = str(uuid.uuid4())
+                
+                # Create dialogue event that frontend can use to render UI
+                dialogue_event = {
+                    "type": "dialogue",
+                    "processId": dialogue_id,
+                    "message": f"Do you want to call function '{function_call.name}'?",
+                    "options": ["run", "cancel"],
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "pending",
+                    "function_name": function_call.name,
+                    "function_args": function_call.args if function_call.args else {}
+                }
+                
+                yield f"data: {json.dumps(dialogue_event)}\n\ndata: {sse_event}\n\n"
+            else:
+              yield f"data: {sse_event}\n\n"
         except Exception as e:
           logger.exception("Error in event_generator: %s", e)
           # You might want to yield an error event here

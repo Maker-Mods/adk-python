@@ -307,13 +307,17 @@ class BaseLlmFlow(ABC):
 
     end_invocation = False
     async for event in self._preprocess_async(invocation_context, llm_request):
+      # print("&&&&&&&&&", event)
       # if the event is a dialogue trigger, then set skip summarization which is condition for event.is_final_response()
-      if event.get_function_responses() and event.get_function_responses()[0].name in invocation_context.run_config.dialogue_triggers:
-        event.actions.skip_summarization = True
-        invocation_context.end_invocation = True
-        end_invocation = True
+      # if event.get_function_responses() and event.get_function_responses()[0].name in invocation_context.run_config.dialogue_triggers:
+      #   event.actions.skip_summarization = True
+      #   invocation_context.end_invocation = True
+      #   end_invocation = True
+      #   print("IS DIALOGUE TRIGGER")
+      
       yield event
     if invocation_context.end_invocation or end_invocation:
+      print("DIALOGUE TRIGGER END INVOCATION")
       return
 
     # Calls the LLM.
@@ -333,6 +337,13 @@ class BaseLlmFlow(ABC):
         # Update the mutable event id to avoid conflict
         model_response_event.id = Event.new_id()
         model_response_event.timestamp = datetime.datetime.now().timestamp()
+        # print("&&&&&&&&&", event)
+        # # if the event is a dialogue trigger, then set skip summarization which is condition for event.is_final_response()
+        # if event.get_function_calls() and event.get_function_calls()[0].name in invocation_context.run_config.dialogue_triggers:
+        #   event.actions.skip_summarization = True
+        #   invocation_context.end_invocation = True
+        #   end_invocation = True
+        #   print("IS DIALOGUE TRIGGER")
         yield event
 
   async def _preprocess_async(
