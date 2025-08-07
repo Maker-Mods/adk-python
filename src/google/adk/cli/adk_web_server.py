@@ -100,6 +100,8 @@ def as_dialogue_trigger(func):
   print(func.__name__, "is a dialogue trigger")
   return func
 
+
+
 class ApiServerSpanExporter(export_lib.SpanExporter):
 
   def __init__(self, trace_dict):
@@ -852,74 +854,19 @@ class AdkWebServer:
               StreamingMode.SSE if req.streaming else StreamingMode.NONE
           )
           runner = await self.get_runner_async(req.app_name)
-
-          try:
-            async for event in runner.run_async(
-                user_id=req.user_id,
-                session_id=req.session_id,
-                new_message=req.new_message,
-                state_delta=req.state_delta,
-                run_config=RunConfig(
-                    streaming_mode=stream_mode,
-                    dialogue_triggers=set(dialogue_triggers.keys()) if dialogue_triggers else None
-                ),
-            ):
-              #print("%####", event, "#####")
-              
-              # Check if this is a dialogue trigger event
-              # NOTE: Dialogue triggers are now handled by the proper dialogue system in project_api.py
-              # This old dialogueOption system is disabled to avoid conflicts
-              # if (event.get_function_responses() and 
-              #     dialogue_triggers and 
-              #     event.get_function_responses()[0].name in dialogue_triggers):
-              #   # Old dialogue system - now handled by project_api.py dialogue system
-              #   pass
-              # else
-
-              # Format as SSE data
-              sse_event = event.model_dump_json(exclude_none=True, by_alias=True)
-              logger.debug(
-                  "Generated event in agent run streaming: %s", sse_event
-              )
-              # if event.get_function_calls() and event.get_function_calls()[0].name in dialogue_triggers:
-                
-              #   # Then yield a dialogue event for the frontend to render UI
-              #   import uuid
-              #   import json
-              #   from datetime import datetime
-                
-              #   function_call = event.get_function_calls()[0]
-              #   dialogue_id = str(uuid.uuid4())
-                
-              #   # Create dialogue event that frontend can use to render UI
-                # dialogue_event = {
-                #     "type": "dialogue",
-                #     "processId": dialogue_id,
-                #     "message": f"Do you want to call function '{function_call.name}'?",
-                #     "options": ["run", "cancel"],
-                #     "timestamp": datetime.now().isoformat(),
-                #     "status": "pending",
-                #     "function_name": function_call.name,
-                #     "function_args": function_call.args if function_call.args else {}
-                # }
-                
-                # logger.info(f"Generated dialogue event for function '{function_call.name}': {dialogue_event}")
-                # yield f"data: {json.dumps(dialogue_event)}\n\ndata: {sse_event}\n\n"
-              # else:
-              yield f"data: {sse_event}\n\n"
-          except StopAsyncIteration:
-            pass
-          except StopIteration:
-            pass
-          except GeneratorExit:
-            pass
-          except Exception as e:
-            logger.exception("Error in runner iteration: %s", e)
-          finally:
-            try:
-              await runner.close()
-            except Exception as e:
-              logger.warning(f"Error closing runner: {e}")
+          async for event in runner.run_async(
+              user_id=req.user_id,
+              session_id=req.session_id,
+              new_message=req.new_message,
+              state_delta=req.state_delta,
+              run_config=RunConfig(streaming_mode=stream_mode),
+          ):
+            # Format as SSE data
+            sse_event = event.model_dump_json(exclude_none=True, by_alias=True)
+            logger.debug(
+                "Generated event in agent run streaming: %s", sse_event
+            )
+            yield f"data: {sse_event}\n\n"
         except Exception as e:
           logger.exception("Error in event_generator: %s", e)
           # You might want to yield an error event here
@@ -991,16 +938,18 @@ class AdkWebServer:
                 
                 function_call = event.get_function_calls()[0]
                 dialogue_id = str(uuid.uuid4())
+
+                print(function_call.args.get("func_path", function_call.name).split(".")[-1])
                 
                 # Create dialogue event that frontend can use to render UI
                 dialogue_event = {
                     "type": "dialogue",
                     "processId": dialogue_id,
-                    "message": f"Do you want to call function '{function_call.name}'?",
+                    "message": f"Do you want to call function '{function_call.args.get("func_path", function_call.name).split(".")[-1]}'?",
                     "options": ["run", "cancel"],
                     "timestamp": datetime.now().isoformat(),
                     "status": "pending",
-                    "function_name": function_call.name,
+                    "function_name": function_call.args["func_path"].split(".")[-1] if function_call.args and function_call.args.get("func_path") else function_call.name,
                     "function_args": function_call.args if function_call.args else {}
                 }
                 
